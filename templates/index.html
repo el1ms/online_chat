@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online-chat</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="light">
+    <div class="user-bar">
+        <span id="whoami">未登录</span>
+        <span id="user-actions">
+            <button id="btn-theme">🌙 黑夜</button>
+            <button id="btn-login">登录</button>
+            <button id="btn-register">注册</button>
+            <button id="btn-logout" style="display: none">登出</button>
+        </span>
+    </div>
+
+    <div class="chat-container">
+        <h1>💬 在线聊天室</h1>
+        <div id="messages" class="messages"></div>
+        <form id="send-form" class="send-form">
+            <input type="text" id="content" placeholder="说点什么..." maxlength="200">
+            <button type="submit" id="send-btn">发送</button>
+        </form>
+    </div>
+
+    <!-- 登录/注册弹窗（默认隐藏） -->
+    <div id="auth-modal" class="modal hidden">
+        <div class="modal-box">
+            <h2 id="modal-title">登录</h2>
+            <input type="text" id="auth-username" placeholder="用户名" maxlength="20">
+            <input type="password" id="auth-password" placeholder="密码">
+            <div class="modal-actions">
+                <button id="auth-submit">确认</button>
+                <button id="auth-cancel">取消</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="/static/js/chat.js"></script>
+</body>
+</html>
