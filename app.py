@@ -116,7 +116,7 @@ def me():
     return jsonify({'id': user['id'], 'username': user['username']})
 
 
+db.init_db()   # 挪出来：python app.py 和 gunicorn 都能触发
 
 if __name__ == '__main__':
-    db.init_db()
     app.run(host='0.0.0.0', debug=False)
