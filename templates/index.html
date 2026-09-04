@@ -11,6 +11,7 @@
         <span id="whoami">未登录</span>
         <span id="user-actions">
             <button id="btn-theme">🌙 黑夜</button>
+            <button id="btn-friends" style="display: none">好友<span id="friend-badge" class="badge" style="display: none"></span> </button>
             <button id="btn-login">登录</button>
             <button id="btn-register">注册</button>
             <button id="btn-logout" style="display: none">登出</button>
@@ -19,6 +20,7 @@
 
     <div class="chat-container">
         <h1>💬 在线聊天室</h1>
+        <div id="user-list" class="user-list"></div>
         <div id="messages" class="messages"></div>
         <form id="send-form" class="send-form">
             <input type="text" id="content" placeholder="说点什么..." maxlength="200">
@@ -35,6 +37,32 @@
             <div class="modal-actions">
                 <button id="auth-submit">确认</button>
                 <button id="auth-cancel">取消</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="friends-modal" class="modal hidden">
+        <div class="modal-box friends-box">
+            <h2>好友</h2>
+
+            <div class="friends-section">
+                <div class="friends-label">待处理申请</div>
+                <div id="friend-requests"></div>
+            </div>
+
+            <div class="friends-section">
+                <div class="friends-label">我的好友</div>
+                <div id="friend-list"></div>
+            </div>
+
+            <div class="friends-section">
+                <div class="friends-label">添加好友</div>
+                <div id="add-friend-list"></div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="friends-close">关闭</button>
             </div>
         </div>
     </div>

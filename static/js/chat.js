@@ -12,6 +12,18 @@ const authPassword = document.getElementById('auth-password');
 const authSubmit = document.getElementById('auth-submit');
 const authCancel = document.getElementById('auth-cancel');
 const sendBtn = document.getElementById('send-btn');
+const userList =document.getElementById('user-list');
+const btnFriends = document.getElementById('btn-friends');
+const friendBadge = document.getElementById('friend-badge');
+const friendsModal = document.getElementById('friends-modal');
+const friendsClose = document.getElementById('friends-close');
+const friendRequestsBox = document.getElementById('friend-requests');
+const friendListBox = document.getElementById('friend-list');
+const addFriendListBox = document.getElementById('add-friend-list')
+
+let currentUser = null;
+let myFriendIds = [];
+let outgoingIds = [];
 
 
 // ===== 1. 画一条消息 =====
@@ -47,18 +59,14 @@ async function loadMessages(){
     const resp = await fetch('/api/messages');
     const messages = await resp.json();
 
-    // 新增①：用户离底部超过 100px（正在翻历史）→ 这次轮询不打扰
-    const nearBottom = messagesBox.scrollHeight - messagesBox.scrollTop
-                     - messagesBox.clientHeight < 100;
-    if (!nearBottom) return;
-
     messagesBox.innerHTML = '';
     for (const msg of messages) {
         renderMessage(msg);
     }
     // 新增②：书签 = 画面里最早一条（后端返回时间正序，第一条就是最早的）
     if (messages.length > 0) {
-        earliestId = messages[0].id;
+        earliestId = messages[0].id;                  // 最早一条（上滑历史用）
+        lastId = messages[messages.length - 1].id;    // 最新一条（增量轮询用）← 新增
     }
     messagesBox.scrollTop = messagesBox.scrollHeight;   // 自动滚到最底
 }
@@ -83,7 +91,7 @@ sendForm.addEventListener('submit', async function (event){
 
     if (resp.status === 201) {
         contentInput.value = '';          // 清空输入框
-        loadMessages();                   // 立刻刷新
+        loadNew();          // 原 loadMessages() → 改增量，不再整屏重画
         startCooldown();                  // 启动 5 秒倒计时（按钮变灰）
     } else {
         const data = await resp.json();
@@ -114,7 +122,8 @@ function startCooldown() {
 
 
 // ===== 4.5 上滑加载历史（游标分页前端） =====
-let earliestId = null;       // 书签：画面里最早一条消息的 id
+let earliestId = null;   // 书签：画面最早一条（上滑历史用）
+let lastId = null;       // 书签：画面最新一条（增量轮询用）← 新增
 let loadingHistory = false;  // 正在拉？防抖
 let noMore = false;          // 历史拉光了？
 
@@ -137,6 +146,31 @@ async function loadHistory() {
         messagesBox.scrollTop += messagesBox.scrollHeight - oldHeight;
     }
     loadingHistory = false;
+}
+
+// ===== 4.6 轮询增量：只拉比 lastId 新的消息，append 队尾，永不重画 =====
+async function loadNew() {
+    if (lastId === null) {
+        return loadMessages();   // 画面还是空的 → 退化成全量拉（防止永远拉不到第一条）
+    }
+
+    const resp = await fetch('/api/messages?after_id=' + lastId);
+    const fresh = await resp.json();
+    if (fresh.length === 0) return;   // 没新消息，啥也不干
+
+    // 拉之前先看：我现在在底部吗？（决定拉完要不要跟着滚）
+    const nearBottom = messagesBox.scrollHeight - messagesBox.scrollTop
+                     - messagesBox.clientHeight < 100;
+
+    for (const msg of fresh) {
+        renderMessage(msg);          // append 队尾（不带 prepend = 默认 appendChild）
+    }
+    lastId = fresh[fresh.length - 1].id   // 书签前移
+
+    if (nearBottom) {
+        messagesBox.scrollTop = messagesBox.scrollHeight;   // 在底部 → 跟着滚到底
+    }
+    // 不在底部（正在翻历史）→ 不动，新消息静静躺在下面，不打扰你
 }
 
 // 消息区滚到顶 → 自动加载更早的
@@ -196,11 +230,19 @@ async function refreshUser() {
         btnLogin.style.display = 'none';
         btnRegister.style.display = 'none';
         document.getElementById('btn-logout').style.display = 'inline';
+        currentUser = me;
+        btnFriends.style.display = 'inline';
+        updateFriendBadge();
+        loadUsers();               // ← 登录成功，拉好友列表
     } else {
         whoami.textContent = '未登录';
         btnLogin.style.display = 'inline';
         btnRegister.style.display = 'inline';
         document.getElementById('btn-logout').style.display = 'none';
+        currentUser = null;
+        btnFriends.style.display = 'none';
+        friendsModal.classList.add('hidden');
+        userList.innerHTML = '';   // ← 登出，清空列表
     }
 }
 
@@ -210,6 +252,27 @@ document.getElementById('btn-logout').addEventListener('click', async function (
 });
 
 refreshUser();   // 页面一打开先问一句"我是谁"
+
+
+// 渲染用户列表
+async function loadUsers() {
+    const resp = await fetch('/api/users');
+    const users = await resp.json();
+
+    userList.innerHTML = '';
+    for (const u of users) {
+        const chip = document.createElement('span');
+        chip.className = 'user-chip';
+        chip.textContent = u.username;
+        chip.dataset.id = u.id;          // 把 id 藏进 data 属性，点击时读
+        chip.addEventListener('click', function () {
+            // 选中高亮（真正私聊在后面课接入）
+            document.querySelectorAll('.user-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+        });
+        userList.appendChild(chip);
+    }
+}
 
 
 // ===== 主题切换：一键换肤 + localStorage 记住选择 =====
@@ -233,5 +296,164 @@ applyTheme(savedTheme);
 
 
 // ===== 6. 轮询：页面打开先拉一次，之后每2秒拉一次 =====
-loadMessages();
-setInterval(loadMessages, 2000);
+loadMessages();               // 页面打开：首载一次（全量）
+setInterval(loadNew, 2000);   // 之后每 2 秒：只补新增（原 setInterval(loadMessages, ...)）
+
+
+// ===== 7. 好友系统：申请 → 验证通过 → 好友 =====
+
+// 打开 / 关闭好友弹窗
+btnFriends.addEventListener('click', function () {
+    friendsModal.classList.remove('hidden');
+    loadFriendsPanel();
+});
+friendsClose.addEventListener('click', function () {
+    friendsModal.classList.add('hidden');
+})
+
+// 弹窗三块一起刷（有先后：先拿申请和好友，"添加好友"才知道谁该藏谁该灰）
+async function loadFriendsPanel() {
+    await loadFriendRequests();   //  记下 outgoingIds
+    await loadFriendList();      //  记下 outgoingIds
+    loadAddFriendList();          //  用上面两个结果过滤
+}
+
+// ① 待处理申请（发给我的，带"通过/拒绝"按钮）
+async function loadFriendRequests() {
+    const resp = await fetch('/api/friend_requests');
+    if (!resp.ok) return;
+    const data = await resp.json();   // {incoming: 发给我的, outgoing: 我发出的}
+
+    outgoingIds = data.outgoing.map(r => r.to_user_id);   // 记下我申请过谁
+
+    friendRequestsBox.innerHTML = '';
+    if (data.incoming.length === 0) {
+        friendRequestsBox.innerHTML = '<span class="muted">暂无申请</span>';
+        updateFriendBadge(0);
+        return;
+    }
+    for (const r of data.incoming) {
+        const row = document.createElement('div');
+        row.className = 'friend-row';
+
+        const label = document.createElement('span');
+        label.textContent = r.username + ' 申请加你为好友';
+
+        const btns = document.createElement('span');
+        const btnAccept = document.createElement('button');
+        btnAccept.className = 'btn-mini btn-accept';
+        btnAccept.textContent = '通过';
+        btnAccept.addEventListener('click', () => resolveRequest(r.id, 'accept'));
+
+        const btnReject = document.createElement('button');
+        btnReject.className = 'btn-mini btn-reject';
+        btnReject.textContent = '拒绝';
+        btnReject.addEventListener('click', () => resolveRequest(r.id, 'reject'));
+
+        btns.appendChild(btnAccept);
+        btns.appendChild(btnReject);
+        row.appendChild(label);
+        row.appendChild(btns);
+        friendRequestsBox.appendChild(row);
+    }
+    updateFriendBadge(data.incoming.length);   // 顺手刷新红点
+}
+
+// 通过 / 拒绝（action = 'accept' 或 'reject'）
+async function resolveRequest(requestId, action) {
+    const resp = await fetch('/api/friend_requests/' + requestId + '/' + action, { method: 'POST'});
+    if (resp.ok) {
+        loadFriendsPanel();   // 三块全刷（通过后对方立刻出现在好友列表里）
+    } else {
+        const data = await resp.json();
+        alert(data.error);
+    }
+}
+
+// ② 我的好友（通过了验证的人）
+async function loadFriendList() {
+    const resp = await fetch('/api/friends');
+    if (!resp.ok) return;
+    const friends = await resp.json();
+
+    myFriendIds = friends.map(f => f.id);   // 记下编号，给"添加好友"过滤用
+
+    friendListBox.innerHTML = '';
+    if (friends.length === 0) {
+        friendListBox.innerHTML = '<span class="muted">还没有好友，去下面加一个</span>';
+        return;
+    }
+    for (const f of friends) {
+        const chip = document.createElement('span');
+        chip.className = 'user-chip';
+        chip.textContent = f.username;
+        friendListBox.appendChild(chip);
+    }
+}
+
+// ③ 添加好友（列出能加的人：已是好友的藏起来，已申请的按钮变灰）
+async function loadAddFriendList() {
+    const resp = await fetch('/api/users');
+    const users = await resp.json();
+
+    addFriendListBox.innerHTML = '';
+    let shown = 0;
+    for (const u of users) {
+        if (myFriendIds.includes(u.id)) continue;   // 已是好友，不显示
+
+        const row = document.createElement('div');
+        row.className = 'friend-row';
+
+        const name = document.createElement('span');
+        name.textContent = u.username;
+
+        const btn = document.createElement('button');
+        if (outgoingIds.includes(u.id)) {
+            btn.className = 'btn-mini';
+            btn.textContent = '已申请';
+            btn.disabled = true;                    // 灰掉，防重复点
+        } else {
+            btn.className = 'btn-mini btn-accept';
+            btn.textContent = '加好友';
+            btn.addEventListener('click', async function () {
+                const r = await fetch('/api/friend_requests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to_user_id: u.id })
+                });
+                if (r.ok) {
+                    loadFriendsPanel();             // 刷新后按钮变"已申请"
+                } else {
+                    const d = await r.json();
+                    alert(d.error);
+                }
+            });
+        }
+
+        row.appendChild(name);
+        row.appendChild(btn);
+        addFriendListBox.appendChild(row);
+        shown++;
+    }
+    if (shown === 0) {
+        addFriendListBox.innerHTML = '<span class="muted">没有可加的人了</span>';
+    }
+}
+
+// 红点：有人申请加我时亮。传了 count 直接用，没传就去后端查
+async function updateFriendBadge(count) {
+    if (count === undefined) {
+        if (currentUser === null) {          // 游客不查（会 401）
+            friendBadge.style.display = 'none';
+            return;
+        }
+        const resp = await fetch('/api/friend_requests');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        count = data.incoming.length;
+    }
+    friendBadge.style.display = (count > 0) ? 'inline-block' : 'none';
+}
+
+// 每 5 秒查一次红点（别人申请加你，不开弹窗也能看到提醒）
+setInterval(updateFriendBadge, 5000);

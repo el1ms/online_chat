@@ -1,4 +1,5 @@
 import sqlite3
+from functools import wraps
 from flask import Flask, jsonify, request, render_template, session
 from werkzeug.security import check_password_hash
 from datetime import datetime
@@ -22,10 +23,15 @@ def index():
 
 @app.route('/api/messages', methods=['GET'])
 def get_messages():
-    """查询参数：?limit=50&before_id=120（都可省略）"""
+    """查询参数：?limit=50&before_id=120（向上翻）/ &after_id=130（向下追）"""
     limit = request.args.get('limit', 50, type=int)
     before_id = request.args.get('before_id', type=int)
-    rows = db.get_recent_messages(limit=limit, before_id=before_id)
+    after_id = request.args.get('after_id', type=int)
+
+    if after_id is not None:
+        rows = db.get_new_messages(after_id, limit)          # 增量：更新的
+    else:
+        rows = db.get_recent_messages(limit=limit, before_id=before_id)  # 全量/历史
     return jsonify([dict(row) for row in rows])
 
 
@@ -114,6 +120,111 @@ def me():
         return jsonify(None)
     user = db.get_user_by_id(user_id)
     return jsonify({'id': user['id'], 'username': user['username']})
+
+
+@app.route('/api/users', methods=['GET'])
+def list_users():
+    """列出所有用户（不含自己，不含密码哈希）"""
+    me_id = session.get('user_id')          # 从手环知道"我是谁"
+    rows = db.list_users_except(me_id)      # 数据库层去查
+    return jsonify([dict(row) for row in rows])
+
+
+# ---------- 好友 API（好友系统：申请 → 验证通过 → 好友） ----------
+
+def login_required(fn):
+    """登录闸门：好友功能必须戴手环，游客一律 401。
+    用法：@app.route(...) 下一行 @login_required，跟 @app.route 叠着写"""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if session.get('user_id') is None:
+            return jsonify({'error': '请先登录'}), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+@app.route('/api/friend_requests', methods=['POST'])
+@login_required
+def send_friend_request():
+    """发起申请。前端传 {to_user_id: 对方编号}"""
+    me_id = session.get('user_id')           # 我是谁（从手环拿，不信前端）
+    data = request.get_json(silent=True) or {}
+    to_user_id = data.get('to_user_id')
+
+    if not isinstance(to_user_id, int) or isinstance(to_user_id, bool):
+        return jsonify({'error': '参数不对'}), 400
+    if to_user_id == me_id:
+        return jsonify({'error': '不能加自己'}), 400
+    if db.get_user_by_id(to_user_id) is None:
+        return jsonify({'error': '这人不存在'}), 400
+    if db.are_friends(to_user_id, me_id):
+        return jsonify({'error': '你们已经是好友了'}), 400
+
+    existing = db.get_pending_request_between(me_id, to_user_id)
+    if existing is not None:
+        if existing['from_user_id'] == me_id:
+            return jsonify({'error': '已经申请过，等对方验证'}), 400
+        else:
+            return jsonify({'error': '对方已向你发出申请，请先处理'}), 400
+
+    request_id = db.create_friend_request(me_id, to_user_id)
+    return jsonify({'id': request_id}), 201
+
+
+@app.route('/api/friend_requests', methods=['GET'])
+@login_required
+def list_friend_requests():
+    """我的申请两本账：incoming = 发给我的（待验证）/ outgoing = 我发出的"""
+    me_id = session.get('user_id')
+    return jsonify({
+        'incoming': [dict(r) for r in db.get_incoming_requests(me_id)],
+        'outgoing': [dict(r) for r in db.get_outgoing_requests(me_id)]
+    })
+
+
+@app.route('/api/friend_requests/<int:request_id>/accept', methods=['POST'])
+@login_required
+def accept_request(request_id):
+    """验证通过：只有收申请的人能点，且只能点一次"""
+    me_id = session.get('user_id')
+    req = db.get_friend_request_by_id(request_id)
+
+    if req is None:
+        return jsonify({'error': '申请不存在'}), 404
+    if req['to_user_id'] != me_id:                       # 不是发给我的 → 越权
+        return jsonify({'error': '只能处理发给你的申请'}), 403
+    if req['status'] != 'pending':                       # 处理过了
+        return jsonify({'error': '这条申请已经处理过'}), 400
+
+    db.accept_friend_request(request_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/friend_requests/<int:request_id>/reject', methods=['POST'])
+@login_required
+def reject_request(request_id):
+    """拒绝：同样只有收申请的人能点，且只能点一次"""
+    me_id = session.get('user_id')
+    req = db.get_friend_request_by_id(request_id)
+
+    if req is None:
+        return jsonify({'error': '申请不存在'}), 404
+    if req['to_user_id'] != me_id:
+        return jsonify({'error': '只能处理发给你的申请'}), 403
+    if req['status'] != 'pending':
+        return jsonify({'error': '这条申请已经处理过'}), 400
+
+    db.reject_friend_request(request_id)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/friends', methods=['GET'])
+@login_required
+def list_friends():
+    """我的好友列表（通过了验证的人）"""
+    me_id = session.get('user_id')
+    return jsonify([dict(r) for r in db.get_friends(me_id)])
+
 
 
 db.init_db()   # 挪出来：python app.py 和 gunicorn 都能触发
