@@ -226,6 +226,29 @@ def list_friends():
     return jsonify([dict(r) for r in db.get_friends(me_id)])
 
 
+@app.route('/api/friends/<int:friend_id>', methods=['DELETE'])
+@login_required
+def delete_friend(friend_id):
+    """删除好友。DELETE 方法 = 语义上的"删资源"，跟 GET 拿 / POST 造对着记"""
+    me_id = session.get('user_id')
+    if friend_id == me_id:
+        return jsonify({'error': '不能删自己'}), 400
+    if not db.are_friends(me_id, friend_id):
+        return jsonify({'error': '你们不是好友'}), 400
+    db.remove_friend(me_id, friend_id)
+    return jsonify({'ok': True})
+
+@app.route('/api/users/search', methods=['GET'])
+@login_required
+def search_users_route():
+    """按用户名搜人（添加好友用）。查询参数 ?q=关键词"""
+    me_id = session.get('user_id')
+    keyword = (request.args.get('q') or '').strip()
+    if not keyword:
+        return jsonify([])      # 空关键词不搜，直接回空列表
+    rows = db.search_users(keyword, me_id)
+    return jsonify([dict(row) for row in rows])
+
 
 db.init_db()   # 挪出来：python app.py 和 gunicorn 都能触发
 

@@ -192,6 +192,21 @@ h1 { font-size: 20px; margin-bottom: 12px; }
 }
 
 
+/* ===== 搜索加好友 ===== */
+.search-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+.search-row input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card);
+    color: var(--text);
+}
+
 
 /* ===== 手机适配：屏幕宽 ≤ 600px 时才生效 ===== */
 @media (max-width: 600px) {

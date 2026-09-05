@@ -261,3 +261,30 @@ def get_friends(user_id):
     ).fetchall()
     conn.close()
     return rows
+
+def remove_friend(user_id, friend_id):
+    """删除好友：两行关系一起删（我→他、他→我），跟通过时写两行正好对称"""
+    conn = get_db()
+    conn.execute(
+        'DELETE FROM friends WHERE user_id = ? AND friend_id = ?',
+        (user_id, friend_id)
+    )
+    conn.execute(
+        'DELETE FROM friends WHERE user_id = ? AND friend_id = ?',
+        (friend_id, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+def search_users(keyword, user_id):
+    """按用户名模糊搜索（不含自己，最多 20 条）。
+    LIKE '%关键词%' = 只要名字里含有这几个字就算命中"""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT id, username FROM users
+            WHERE username LIKE ? AND id != ?
+            ORDER BY username LIMIT 20""",
+        ('%' + keyword + '%', user_id)
+    ).fetchall()
+    conn.close()
+    return rows

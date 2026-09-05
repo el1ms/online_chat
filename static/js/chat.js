@@ -19,7 +19,10 @@ const friendsModal = document.getElementById('friends-modal');
 const friendsClose = document.getElementById('friends-close');
 const friendRequestsBox = document.getElementById('friend-requests');
 const friendListBox = document.getElementById('friend-list');
-const addFriendListBox = document.getElementById('add-friend-list')
+const addFriendListBox = document.getElementById('add-friend-list');
+const friendSearchInput = document.getElementById('friend-search');
+const btnSearch = document.getElementById('btn-search');
+
 
 let currentUser = null;
 let myFriendIds = [];
@@ -315,7 +318,8 @@ friendsClose.addEventListener('click', function () {
 async function loadFriendsPanel() {
     await loadFriendRequests();   //  记下 outgoingIds
     await loadFriendList();      //  记下 outgoingIds
-    loadAddFriendList();          //  用上面两个结果过滤
+    friendSearchInput.value = '';
+    addFriendListBox.innerHTML = '<span class="muted">输入用户名搜索，回车或点搜索按钮</span>';
 }
 
 // ① 待处理申请（发给我的，带"通过/拒绝"按钮）
@@ -384,23 +388,48 @@ async function loadFriendList() {
         return;
     }
     for (const f of friends) {
-        const chip = document.createElement('span');
-        chip.className = 'user-chip';
-        chip.textContent = f.username;
-        friendListBox.appendChild(chip);
+        const row = document.createElement('div');
+        row.className = 'friend-row';
+
+        const name = document.createElement('span');
+        name.textContent = f.username;
+
+        const btnDel = document.createElement('button');
+        btnDel.className = 'btn-mini btn-reject';
+        btnDel.textContent = '✕';
+        btnDel.addEventListener('click', async function () {
+            // confirm = 浏览器自带的确认弹窗，点取消返回 false
+            if (!confirm('确定删除好友' + f.username + '吗')) return;
+            const r = await fetch('/api/friends/' + f.id, { method: 'DELETE' });
+            if (r.ok) {
+                loadFriendsPanel();          // 删完三块全刷
+            } else {
+                const d =await r.json();
+                alert(d.error);
+            }
+        });
+
+        row.appendChild(name);
+        row.appendChild(btnDel);
+        friendListBox.appendChild(row);
     }
 }
 
-// ③ 添加好友（列出能加的人：已是好友的藏起来，已申请的按钮变灰）
-async function loadAddFriendList() {
-    const resp = await fetch('/api/users');
+// ③ 添加好友（搜索版：输用户名 → 回车/点按钮 → 后端搜，最多画 20 条）
+async function searchUsers() {
+    const keyword = friendSearchInput.value.trim();
+    if (!keyword) return;              // 空关键词不搜
+
+    const resp = await fetch('/api/users/search?q=' + encodeURIComponent(keyword));
+    if (!resp.ok) return;
     const users = await resp.json();
 
     addFriendListBox.innerHTML = '';
-    let shown = 0;
+    if (users.length === 0) {
+        addFriendListBox.innerHTML = '<span class="muted">没找到这个人</span>';
+        return;
+    }
     for (const u of users) {
-        if (myFriendIds.includes(u.id)) continue;   // 已是好友，不显示
-
         const row = document.createElement('div');
         row.className = 'friend-row';
 
@@ -408,10 +437,14 @@ async function loadAddFriendList() {
         name.textContent = u.username;
 
         const btn = document.createElement('button');
-        if (outgoingIds.includes(u.id)) {
+        if (myFriendIds.includes(u.id)) {
+            btn.className = 'btn-mini';
+            btn.textContent = '已好友';
+            btn.disabled = true;
+        } else if (outgoingIds.includes(u.id)) {
             btn.className = 'btn-mini';
             btn.textContent = '已申请';
-            btn.disabled = true;                    // 灰掉，防重复点
+            btn.disabled = true;
         } else {
             btn.className = 'btn-mini btn-accept';
             btn.textContent = '加好友';
@@ -422,7 +455,7 @@ async function loadAddFriendList() {
                     body: JSON.stringify({ to_user_id: u.id })
                 });
                 if (r.ok) {
-                    loadFriendsPanel();             // 刷新后按钮变"已申请"
+                    loadFriendsPanel();
                 } else {
                     const d = await r.json();
                     alert(d.error);
@@ -433,12 +466,14 @@ async function loadAddFriendList() {
         row.appendChild(name);
         row.appendChild(btn);
         addFriendListBox.appendChild(row);
-        shown++;
-    }
-    if (shown === 0) {
-        addFriendListBox.innerHTML = '<span class="muted">没有可加的人了</span>';
     }
 }
+
+// 搜索的两个触发方式：点按钮、按回车
+btnSearch.addEventListener('click', searchUsers);
+friendSearchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') searchUsers();
+});
 
 // 红点：有人申请加我时亮。传了 count 直接用，没传就去后端查
 async function updateFriendBadge(count) {
