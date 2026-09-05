@@ -22,9 +22,14 @@ const friendListBox = document.getElementById('friend-list');
 const addFriendListBox = document.getElementById('add-friend-list');
 const friendSearchInput = document.getElementById('friend-search');
 const btnSearch = document.getElementById('btn-search');
+const btnLobby = document.getElementById('btn-lobby');
+const chatWith = document.getElementById('chat-with');
 
 
 let currentUser = null;
+let chatMode = 'public';        // 当前是 'public'（大厅）还是 'private'（私聊）
+let peerId = null;              // 私聊时：对方的用户 id
+let peerUsername = '';           // 私聊时：对方的用户名（画消息头部用）
 let myFriendIds = [];
 let outgoingIds = [];
 
@@ -57,9 +62,13 @@ function renderMessage(msg, prepend){
 }
 
 
-// ===== 2. 拉最新消息，刷新整个消息区 =====
+// ===== 2. 拉最新消息，刷新整个消息区（大厅/私聊共用） =====
 async function loadMessages(){
-    const resp = await fetch('/api/messages');
+    const url = (chatMode === 'public')
+        ? '/api/messages'
+        : '/api/private_messages?peer_id=' + peerId;
+
+    const resp = await fetch(url);
     const messages = await resp.json();
 
     messagesBox.innerHTML = '';
@@ -86,21 +95,30 @@ sendForm.addEventListener('submit', async function (event){
         return;
     }
 
-    const resp = await fetch('/api/messages', {
+     // 选 URL：大厅 vs 私聊
+    const url = (chatMode === 'public')
+        ? '/api/messages'
+        : '/api/private_messages';
+
+    const body = (chatMode === 'public')
+        ? JSON.stringify({ content: content })
+        : JSON.stringify({ content: content, peer_id: peerId });
+
+    const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: content })
-    });
+        body: body
+    })
 
-    if (resp.status === 201) {
+    if (resp.ok || resp.status === 201) {
         contentInput.value = '';          // 清空输入框
-        loadNew();          // 原 loadMessages() → 改增量，不再整屏重画
+        loadMessages();
         startCooldown();                  // 启动 5 秒倒计时（按钮变灰）
     } else {
         const data = await resp.json();
         alert(data.error);                // 后端400的error信息显示给用户
     }
-})
+});
 
 
 // ===== 4. 冷却倒计时（挡君子：按钮变灰 + 数字倒数） =====
@@ -153,11 +171,16 @@ async function loadHistory() {
 
 // ===== 4.6 轮询增量：只拉比 lastId 新的消息，append 队尾，永不重画 =====
 async function loadNew() {
+    if (chatMode === 'private') return;
     if (lastId === null) {
         return loadMessages();   // 画面还是空的 → 退化成全量拉（防止永远拉不到第一条）
     }
 
-    const resp = await fetch('/api/messages?after_id=' + lastId);
+    const url = (chatMode === 'public')
+        ? '/api/messages?after_id=' + lastId
+        : '/api/private_messages?peer_id=' + peerId + '&after_id=' + lastId;
+
+    const resp = await fetch(url);
     const fresh = await resp.json();
     if (fresh.length === 0) return;   // 没新消息，啥也不干
 
@@ -269,13 +292,45 @@ async function loadUsers() {
         chip.textContent = u.username;
         chip.dataset.id = u.id;          // 把 id 藏进 data 属性，点击时读
         chip.addEventListener('click', function () {
-            // 选中高亮（真正私聊在后面课接入）
+            // 1. 高亮切换
             document.querySelectorAll('.user-chip').forEach(c => c.classList.remove('active'));
             chip.classList.add('active');
+
+             // 2. 切到私聊模式
+            chatMode = 'private';
+            peerId = Number(chip.dataset.id);
+            peerUsername = chip.textContent;
+
+            // 3. 顶栏更新
+            btnLobby.classList.remove('active');
+            chatWith.textContent = '与 ' + peerUsername + ' 私聊';
+
+            // 4. 重置书签、拉历史
+            lastId = null;
+            earliestId = null;
+            loadMessages();
         });
         userList.appendChild(chip);
     }
 }
+
+
+btnLobby.addEventListener('click', function () {
+    // 切回大厅
+    chatMode = 'public';
+    peerId = null;
+    peerUsername = '';
+
+    btnLobby.classList.add('active');
+    chatWith.textContent = '';
+
+    // 取消用户列表高亮
+    document.querySelectorAll('.user-chip').forEach(c => c.classList.remove('active'));
+
+    lastId = null;
+    earliestId = null;
+    loadMessages();
+});
 
 
 // ===== 主题切换：一键换肤 + localStorage 记住选择 =====

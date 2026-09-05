@@ -66,6 +66,67 @@ def send_message():
     return jsonify(dict(row)), 201
 
 
+# ---------- 好友 API（好友系统：申请 → 验证通过 → 好友） ----------
+
+def login_required(fn):
+    """登录闸门：好友功能必须戴手环，游客一律 401。
+    用法：@app.route(...) 下一行 @login_required，跟 @app.route 叠着写"""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if session.get('user_id') is None:
+            return jsonify({'error': '请先登录'}), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+@app.route('/api/private_messages', methods=['GET', 'POST'])
+@login_required
+def private_messages():
+    me_id = session.get('user_id')
+
+    if request.method == 'GET':
+        peer_id = request.args.get('peer_id', type=int)
+        if not peer_id:
+            return jsonify({'error': '缺少 peer_id'}), 400
+        if peer_id == me_id:
+            return jsonify({'error': '不能和自己私聊'}), 400
+
+        limit = request.args.get('limit', 50, type=int)
+        before_id = request.args.get('before_id', type=int)
+        rows = db.get_private_messages(me_id, peer_id, limit=limit, before_id=before_id)
+        return jsonify([dict(row) for row in rows])
+
+    # POST：发私聊
+    data = request.get_json(silent=True) or {}
+    content = (data.get('content') or '').strip()
+    peer_id = data.get('peer_id')
+    if not content:
+        return jsonify({'error': '消息不能为空'}), 400
+    if not peer_id or not isinstance(peer_id, int):
+        return jsonify({'error': 'peer_id 必须传整数'}), 400
+    if peer_id == me_id:
+        return jsonify({'error': '不能和自己私聊'}), 400
+
+    # 顺手验一下对方存在 + 跟我不是好友（私聊前提是好友）
+    peer = db.get_user_by_id(peer_id)
+    if not peer:
+        return jsonify({'error': '对方不存在'}), 400
+    if not db.are_friends(me_id, peer_id):
+        return jsonify({'error': '只能和好友私聊'}), 403
+
+    msg_id = db.add_private_message(me_id, peer_id, content)
+    msg = db.get_private_message_by_id(msg_id)
+    # 带上对方用户名，前端画气泡要用
+    me = db.get_user_by_id(me_id)
+    return jsonify({
+        'id': msg['id'],
+        'sender_id': msg['sender_id'],
+        'receiver_id': msg['receiver_id'],
+        'username': me['username'],
+        'content': msg['content'],
+        'created_at': msg['created_at'],
+    }), 201
+
 # ---------- 用户 API（第 2 课：session 手环） ----------
 
 @app.route('/api/register', methods=['POST'])
@@ -128,19 +189,6 @@ def list_users():
     me_id = session.get('user_id')          # 从手环知道"我是谁"
     rows = db.list_users_except(me_id)      # 数据库层去查
     return jsonify([dict(row) for row in rows])
-
-
-# ---------- 好友 API（好友系统：申请 → 验证通过 → 好友） ----------
-
-def login_required(fn):
-    """登录闸门：好友功能必须戴手环，游客一律 401。
-    用法：@app.route(...) 下一行 @login_required，跟 @app.route 叠着写"""
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if session.get('user_id') is None:
-            return jsonify({'error': '请先登录'}), 401
-        return fn(*args, **kwargs)
-    return wrapper
 
 
 @app.route('/api/friend_requests', methods=['POST'])

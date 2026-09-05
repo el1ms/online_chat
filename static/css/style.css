@@ -226,3 +226,25 @@ h1 { font-size: 20px; margin-bottom: 12px; }
     .send-form button { padding: 10px 16px; }
     .user-bar button { padding: 6px 10px; } /* 按钮瘦身省地方 */
 }
+
+/* ===== 私聊第 2 课：大厅按钮 ===== */
+.lobby-btn {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+}
+.lobby-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+#chat-with {
+    font-size: 14px;
+    color: var(--text);
+    margin-left: 8px;
+    font-weight: normal;
+}

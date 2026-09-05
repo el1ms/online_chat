@@ -44,6 +44,15 @@ def init_db():
             created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),  
             UNIQUE(user_id, friend_id)                -- 同一对好友只许存一次  
         );
+            
+        CREATE TABLE IF NOT EXISTS private_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id INTEGER NOT NULL,
+            receiver_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+            
     ''')
     conn.commit()
     conn.close()
@@ -288,3 +297,46 @@ def search_users(keyword, user_id):
     ).fetchall()
     conn.close()
     return rows
+
+def add_private_message(sender_id, receiver_id, content):
+    """发一条私聊消息，返回新消息的 id"""
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO private_messages (sender_id, receiver_id, content) VALUES (?, ?, ?)',
+        (sender_id, receiver_id, content)
+    )
+    conn.commit()
+    conn.close()
+    return cursor.lastrowid
+
+def get_private_messages(user_a, user_b, limit=50, before_id=None):
+    """拉 A 和 B 之间的聊天记录。
+    排序用 id（自增编号天然时间顺序），时间正序：先发的在前。
+    支持游标分页：传 before_id 就只拿比它早的"""
+    conn = get_db()
+    if before_id:
+        sql = '''SELECT * FROM private_messages
+                WHERE id < ?
+                AND ((sender_id = ? AND receiver_id = ?)
+                OR (sender_id = ? AND receiver_id = ?))
+                ORDER BY id DESC LIMIT ?'''
+        params = (before_id, user_a, user_b, user_b, user_a, limit)
+    else:
+        sql = '''SELECT * FROM private_messages
+                WHERE (sender_id = ? AND receiver_id = ?)
+                    OR (sender_id = ? AND receiver_id = ?)
+                ORDER BY id DESC LIMIT ?'''
+        params = (user_a, user_b, user_b, user_a, limit)
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return list(reversed(rows))   # 整体翻转：先发的在前（跟大厅 messages 保持一致）
+
+
+def get_private_message_by_id(msg_id):
+    """按 id 找一条私聊消息（用于 POST 返回时回显完整数据）"""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM private_messages WHERE id = ?', (msg_id,)
+    ).fetchone()
+    conn.close()
+    return row
